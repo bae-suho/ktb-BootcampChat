@@ -126,8 +126,8 @@ jobs:
           INSTANCE_IPS: ${{ steps.get-instances.outputs.instance-ips }}
           INSTANCE_IDS: ${{ steps.get-instances.outputs.instance-ids }}
           TG_ARN: ${{ steps.get-instances.outputs.tg-arn }}
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-          NEXT_PUBLIC_SOCKET_URL: ${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
+          NEXT_PUBLIC_API_URL: ${{ env.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_SOCKET_URL: ${{ env.NEXT_PUBLIC_SOCKET_URL }}
         run: |
           echo "🚀 Starting deployment..."
 

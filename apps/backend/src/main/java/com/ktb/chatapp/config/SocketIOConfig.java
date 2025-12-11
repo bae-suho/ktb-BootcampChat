@@ -6,14 +6,11 @@ import com.corundumstudio.socketio.SocketIOServer;
 import com.corundumstudio.socketio.annotation.SpringAnnotationScanner;
 import com.corundumstudio.socketio.namespace.Namespace;
 import com.corundumstudio.socketio.protocol.JacksonJsonSupport;
-import com.corundumstudio.socketio.store.RedissonStoreFactory;
+import com.corundumstudio.socketio.store.MemoryStoreFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ktb.chatapp.websocket.socketio.ChatDataStore;
-import com.ktb.chatapp.websocket.socketio.RedisChatDataStore;
+import com.ktb.chatapp.websocket.socketio.LocalChatDataStore;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.Redisson;
-import org.redisson.api.RedissonClient;
-import org.redisson.config.Config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,55 +32,13 @@ public class SocketIOConfig {
     @Value("${socketio.server.port:5002}")
     private Integer port;
 
-    // 👉 Redis B 설정 값 주입
-    @Value("${socketio.redis.host:localhost}")
-    private String redisHost;
-
-    @Value("${socketio.redis.port:6379}")
-    private Integer redisPort;
-
-    @Value("${socketio.redis.password:}")
-    private String redisPassword;
-
-    /**
-     * Redis B용 Redisson 클라이언트
-     */
-    @Bean(destroyMethod = "shutdown")
-    public RedissonClient socketRedisClient() {
-        Config config = new Config();
-        String address = "redis://" + redisHost + ":" + redisPort;
-
-        var single = config.useSingleServer();
-        single.setAddress(address);
-        single.setConnectionMinimumIdleSize(2);
-        single.setConnectionPoolSize(10);
-
-        // ⚡ 다중 EC2 환경 타임아웃 설정
-        single.setConnectTimeout(10000);  // 연결 타임아웃: 10초
-        single.setTimeout(5000);          // 명령 타임아웃: 5초
-        single.setRetryAttempts(3);       // 재시도 횟수: 3회
-        single.setRetryInterval(1500);    // 재시도 간격: 1.5초
-
-        if (redisPassword != null && !redisPassword.isEmpty()) {
-            single.setPassword(redisPassword);
-        }
-
-        log.info("Socket Redis(B) Config - host: {}, port: {}, password: {}",
-                redisHost, redisPort,
-                redisPassword != null && !redisPassword.isEmpty() ? "***" : "none");
-
-        return Redisson.create(config);
-    }
-
     @Bean(initMethod = "start", destroyMethod = "stop")
-    public SocketIOServer socketIOServer(AuthTokenListener authTokenListener,
-                                         RedissonClient socketRedisClient) {
-
+    public SocketIOServer socketIOServer(AuthTokenListener authTokenListener) {
         com.corundumstudio.socketio.Configuration config = new com.corundumstudio.socketio.Configuration();
         config.setHostname(host);
         config.setPort(port);
 
-        SocketConfig socketConfig = new SocketConfig();
+        var socketConfig = new SocketConfig();
         socketConfig.setReuseAddress(true);
         socketConfig.setTcpNoDelay(false);
         socketConfig.setAcceptBackLog(10);
@@ -99,14 +54,11 @@ public class SocketIOConfig {
         config.setUpgradeTimeout(10000);
 
         config.setJsonSupport(new JacksonJsonSupport(new JavaTimeModule()));
-
-        // ✅ 여기서부터가 핵심: 인메모리 → Redis B 기반 RedissonStoreFactory
-        config.setStoreFactory(new RedissonStoreFactory(socketRedisClient));
+        config.setStoreFactory(new MemoryStoreFactory()); // 단일노드 전용
 
         log.info("Socket.IO server configured on {}:{} with {} boss threads and {} worker threads",
-                host, port, config.getBossThreads(), config.getWorkerThreads());
-
-        SocketIOServer socketIOServer = new SocketIOServer(config);
+                 host, port, config.getBossThreads(), config.getWorkerThreads());
+        var socketIOServer = new SocketIOServer(config);
         socketIOServer.getNamespace(Namespace.DEFAULT_NAME).addAuthTokenListener(authTokenListener);
 
         return socketIOServer;
@@ -124,10 +76,10 @@ public class SocketIOConfig {
         return new SpringAnnotationScanner(socketIOServer);
     }
 
-    // ✅ ChatDataStore도 Redis B를 사용하도록 변경
+    // 인메모리 저장소, 단일 노드 환경에서만 사용
     @Bean
     @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
-    public ChatDataStore chatDataStore(RedissonClient socketRedisClient) {
-        return new RedisChatDataStore(socketRedisClient);
+    public ChatDataStore chatDataStore() {
+        return new LocalChatDataStore();
     }
 }

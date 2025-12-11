@@ -54,7 +54,7 @@ jobs:
 
           INSTANCE_IDS=$(aws elbv2 describe-target-health \
             --target-group-arn $TG_ARN \
-            --query 'TargetHealthDescriptions[?TargetHealth.State==`healthy`].Target.Id' \
+            --query 'TargetHealthDescriptions[].Target.Id' \
             --output text)
 
           if [ -z "$INSTANCE_IDS" ]; then
@@ -75,7 +75,7 @@ jobs:
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           cat >> ~/.ssh/config << 'EOF'
           Host *

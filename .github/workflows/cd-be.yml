@@ -118,7 +118,6 @@ jobs:
           ENCRYPTION_SALT: ${{ secrets.ENCRYPTION_SALT }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           MONGO_URI: ${{ secrets.MONGO_URI }}
-          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
         run: |
           echo "🚀 Starting deployment..."
 
@@ -140,7 +139,6 @@ jobs:
               ENCRYPTION_SALT="${ENCRYPTION_SALT}" \
               JWT_SECRET="${JWT_SECRET}" \
               MONGO_URI="${MONGO_URI}" \
-              REDIS_PASSWORD="${REDIS_PASSWORD}" \
               bash << 'ENDSSH'
               set -e
               mkdir -p ~/ktb-backend && cd ~/ktb-backend

@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy to EC2
+    name: Build & Deploy
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -35,14 +35,35 @@ jobs:
           echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "🏷️ Version: ${SHORT_SHA}"
 
+      # 1. Docker Build & Push를 위한 로그인
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 2. Docker Build & Push 실행
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          # context: Dockerfile이 있는 위치 (루트라면 . 또는 apps/frontend 등 확인 필요)
+          # 만약 apps/frontend 안에 Dockerfile이 있다면 아래 주석 해제 후 경로 수정
+          context: .
+          file: ./apps/frontend/Dockerfile # Dockerfile 경로 명시 (프로젝트 구조에 맞게 수정 필요)
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short-sha }}
+          # 빌드 속도 향상을 위한 캐시 설정
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-      
-      # [삭제됨] Target Group에서 인스턴스를 가져오는 단계 제거
 
       - name: Configure SSH
         run: |
@@ -59,14 +80,12 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.vars.outputs.short-sha }}
           SSH_USER: ${{ secrets.EC2_SSH_USER }}
-          # 수정: Target Group 출력 대신 Secret의 단일 IP 사용
           HOST_IP: ${{ secrets.EC_INSTANCE_FE2 }}
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_SOCKET_URL: ${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
         run: |
           echo "🚀 Starting deployment to $HOST_IP..."
 
-          # 반복문 제거 후 단일 호스트에 대해 실행
           ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${HOST_IP} \
             DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest" \
             API_URL="${NEXT_PUBLIC_API_URL}" \
@@ -80,7 +99,6 @@ jobs:
             ENV_FILE=".env.local"
             touch $ENV_FILE
           
-            # 기존 파일 내용 비우고 새로 쓰기
             > $ENV_FILE
             echo "NEXT_PUBLIC_API_URL=${API_URL}" >> $ENV_FILE
             echo "NEXT_PUBLIC_SOCKET_URL=${SOCKET_URL}" >> $ENV_FILE
@@ -91,7 +109,7 @@ jobs:
             echo "📦 Pulling image: $DOCKER_IMAGE"
             docker pull "$DOCKER_IMAGE"
 
-            # 기존 컨테이너 확인 및 중지
+            # 기존 컨테이너 중지
             OLD=$(docker ps -q -f name=ktb-frontend) || true
             if [ ! -z "$OLD" ]; then
               echo "🛑 Stopping old container: $OLD"
@@ -106,7 +124,7 @@ jobs:
               --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
               "$DOCKER_IMAGE"
 
-            # 헬스 체크 (Health Check)
+            # 헬스 체크
             echo "🏥 Health checking..."
             sleep 10
             for i in {1..30}; do
@@ -120,7 +138,7 @@ jobs:
               sleep 2
             done
 
-            # 실패 시 롤백 로직
+            # 롤백
             echo "❌ Deployment Failed. Rolling back..."
             docker stop ktb-frontend && docker rm ktb-frontend
             if [ ! -z "$OLD" ]; then

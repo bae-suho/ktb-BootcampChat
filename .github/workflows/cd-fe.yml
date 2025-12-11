@@ -153,16 +153,31 @@ jobs:
 
               # 환경변수 파일 생성
               echo "⚙️  Creating environment file..."
-              ENV_FILE=".env.production"
-              cat > $ENV_FILE << ENVEOF
-                # Frontend Environment Variables
-                NEXT_PUBLIC_API_URL=$API_URL
-                NEXT_PUBLIC_SOCKET_URL=$SOCKET_URL
-                NODE_ENV=production
-                PORT=3000
-              ENVEOF
+              ENV_FILE=".env.local"
+              cat > $ENV_FILE <<ENVEOF
+NEXT_PUBLIC_API_URL=$API_URL
+NEXT_PUBLIC_SOCKET_URL=$SOCKET_URL
+NODE_ENV=production
+PORT=3000
+ENVEOF
 
-              echo "✅ Environment file created:"
+              # 환경변수 파일 생성 확인
+              if [ ! -f "$ENV_FILE" ]; then
+                echo "❌ Error: Environment file was not created"
+                exit 1
+              fi
+
+              if [ ! -s "$ENV_FILE" ]; then
+                echo "❌ Error: Environment file is empty"
+                exit 1
+              fi
+
+              if ! grep -q "NEXT_PUBLIC_API_URL" "$ENV_FILE"; then
+                echo "❌ Error: NEXT_PUBLIC_API_URL not found in environment file"
+                exit 1
+              fi
+
+              echo "✅ Environment file created successfully:"
               cat $ENV_FILE
 
               echo "📦 Pulling image: $DOCKER_IMAGE"

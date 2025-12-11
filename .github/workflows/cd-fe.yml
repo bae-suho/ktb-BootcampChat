@@ -110,7 +110,7 @@ jobs:
             if ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${IP} << 'ENDSSH'
               set -e
               mkdir -p ~/ktb-frontend && cd ~/ktb-frontend
-              docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+              docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
               OLD=$(docker ps -q -f name=ktb-frontend) || true
               docker stop ktb-frontend 2>/dev/null || true
               docker rm ktb-frontend 2>/dev/null || true

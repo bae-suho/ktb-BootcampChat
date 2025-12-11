@@ -154,12 +154,15 @@ jobs:
               # 환경변수 파일 생성
               echo "⚙️  Creating environment file..."
               ENV_FILE=".env.local"
-              cat > $ENV_FILE <<ENVEOF
-NEXT_PUBLIC_API_URL=$API_URL
-NEXT_PUBLIC_SOCKET_URL=$SOCKET_URL
-NODE_ENV=production
-PORT=3000
-ENVEOF
+              touch $ENV_FILE
+              
+              echo "API_URL=${NEXT_PUBLIC_API_URL}" >> $ENV_FILE
+              echo "SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL}" >> $ENV_FILE
+              
+              echo "📄  Environment file created:"
+              cat $ENV_FILE
+              
+              
 
               # 환경변수 파일 생성 확인
               if [ ! -f "$ENV_FILE" ]; then

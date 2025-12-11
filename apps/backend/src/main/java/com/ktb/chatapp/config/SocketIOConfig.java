@@ -6,11 +6,14 @@ import com.corundumstudio.socketio.SocketIOServer;
 import com.corundumstudio.socketio.annotation.SpringAnnotationScanner;
 import com.corundumstudio.socketio.namespace.Namespace;
 import com.corundumstudio.socketio.protocol.JacksonJsonSupport;
-import com.corundumstudio.socketio.store.MemoryStoreFactory;
+import com.corundumstudio.socketio.store.RedissonStoreFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ktb.chatapp.websocket.socketio.ChatDataStore;
-import com.ktb.chatapp.websocket.socketio.LocalChatDataStore;
+import com.ktb.chatapp.websocket.socketio.RedisChatDataStore;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
+import org.redisson.config.Config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -32,18 +35,61 @@ public class SocketIOConfig {
     @Value("${socketio.server.port:5002}")
     private Integer port;
 
+    // 👉 Redis A 설정 값 주입 (Session Redis 재사용)
+    @Value("${spring.data.redis.host:localhost}")
+    private String redisHost;
+
+    @Value("${spring.data.redis.port:6379}")
+    private Integer redisPort;
+
+    @Value("${spring.data.redis.password:}")
+    private String redisPassword;
+
+    /**
+     * Socket.IO용 Redisson 클라이언트 (Redis A 사용)
+     * Session과 동일한 Redis 인스턴스를 사용하여 네트워크 오버헤드 감소
+     */
+    @Bean(destroyMethod = "shutdown")
+    public RedissonClient socketRedisClient() {
+        Config config = new Config();
+        String address = "redis://" + redisHost + ":" + redisPort;
+
+        var single = config.useSingleServer();
+        single.setAddress(address);
+        single.setConnectionMinimumIdleSize(50);   // 10 -> 50: 최소 유휴 연결 대폭 증가
+        single.setConnectionPoolSize(500);         // 100 -> 500: 1000명 동시 연결 대비
+        single.setSubscriptionConnectionMinimumIdleSize(10);
+        single.setSubscriptionConnectionPoolSize(100);  // pub/sub 전용 풀
+
+        if (redisPassword != null && !redisPassword.isEmpty()) {
+            single.setPassword(redisPassword);
+        }
+
+        log.info("╔═══════════════════════════════════════════════════════════════════════════════╗");
+        log.info("║                    Socket.IO Redis(A) Configuration                           ║");
+        log.info("╠═══════════════════════════════════════════════════════════════════════════════╣");
+        log.info("║  Host: {}:{}", redisHost, redisPort);
+        log.info("║  Password: {}", redisPassword != null && !redisPassword.isEmpty() ? "***" : "none");
+        log.info("║  Use Case: Socket.IO Store + Session (Unified)                               ║");
+        log.info("╚═══════════════════════════════════════════════════════════════════════════════╝");
+
+        return Redisson.create(config);
+    }
+
     @Bean(initMethod = "start", destroyMethod = "stop")
-    public SocketIOServer socketIOServer(AuthTokenListener authTokenListener) {
+    public SocketIOServer socketIOServer(AuthTokenListener authTokenListener,
+                                         RedissonClient socketRedisClient) {
+
         com.corundumstudio.socketio.Configuration config = new com.corundumstudio.socketio.Configuration();
         config.setHostname(host);
         config.setPort(port);
-        
-        var socketConfig = new SocketConfig();
+
+        SocketConfig socketConfig = new SocketConfig();
         socketConfig.setReuseAddress(true);
-        socketConfig.setTcpNoDelay(false);
-        socketConfig.setAcceptBackLog(10);
-        socketConfig.setTcpSendBufferSize(4096);
-        socketConfig.setTcpReceiveBufferSize(4096);
+        socketConfig.setTcpNoDelay(true);  // true로 변경 - 지연 없이 즉시 전송
+        socketConfig.setAcceptBackLog(1024);  // 10 -> 1024: 대량 동시 연결 수용
+        socketConfig.setTcpSendBufferSize(65536);  // 4KB -> 64KB: 버퍼 오버플로우 방지
+        socketConfig.setTcpReceiveBufferSize(65536);  // 4KB -> 64KB: 수신 버퍼 증가
         config.setSocketConfig(socketConfig);
 
         config.setOrigin("*");
@@ -51,19 +97,30 @@ public class SocketIOConfig {
         // Socket.IO settings
         config.setPingTimeout(60000);
         config.setPingInterval(25000);
-        config.setUpgradeTimeout(10000);
+        config.setUpgradeTimeout(30000);  // 10s -> 30s: heavy 테스트 시 핸드셰이크 타임아웃 방지
+
+        // Netty 스레드 최적화 (대규모 동시 연결 처리)
+        config.setBossThreads(8);      // Boss 스레드: 연결 수락 담당 (4 -> 8)
+        config.setWorkerThreads(128);  // Worker 스레드: I/O 처리 담당 (32 -> 128, 1000+ 동시 연결 처리)
+
+        // HTTP/WebSocket 제한 완화
+        config.setMaxHttpContentLength(1048576);  // 1MB (기본값 64KB → 증가)
+        config.setMaxFramePayloadLength(1048576); // 1MB WebSocket 프레임
 
         config.setJsonSupport(new JacksonJsonSupport(new JavaTimeModule()));
-        config.setStoreFactory(new MemoryStoreFactory()); // 단일노드 전용
+
+        // ✅ Redis A 기반 RedissonStoreFactory (Session과 통합)
+        config.setStoreFactory(new RedissonStoreFactory(socketRedisClient));
 
         log.info("Socket.IO server configured on {}:{} with {} boss threads and {} worker threads",
-                 host, port, config.getBossThreads(), config.getWorkerThreads());
-        var socketIOServer = new SocketIOServer(config);
+                host, port, config.getBossThreads(), config.getWorkerThreads());
+
+        SocketIOServer socketIOServer = new SocketIOServer(config);
         socketIOServer.getNamespace(Namespace.DEFAULT_NAME).addAuthTokenListener(authTokenListener);
-        
+
         return socketIOServer;
     }
-    
+
     /**
      * SpringAnnotationScanner는 BeanPostProcessor로서
      * ApplicationContext 초기화 초기에 등록되고,
@@ -75,11 +132,11 @@ public class SocketIOConfig {
     public BeanPostProcessor springAnnotationScanner(@Lazy SocketIOServer socketIOServer) {
         return new SpringAnnotationScanner(socketIOServer);
     }
-    
-    // 인메모리 저장소, 단일 노드 환경에서만 사용
+
+    // ✅ ChatDataStore - Redis A 사용 (Session과 통합)
     @Bean
     @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
-    public ChatDataStore chatDataStore() {
-        return new LocalChatDataStore();
+    public ChatDataStore chatDataStore(RedissonClient socketRedisClient) {
+        return new RedisChatDataStore(socketRedisClient);
     }
 }

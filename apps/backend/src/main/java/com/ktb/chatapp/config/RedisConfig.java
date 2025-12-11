@@ -18,7 +18,7 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 /**
  * Redis configuration for session and rate limit storage.
- * Provides high-performance in-memory storage with automatic TTL expiration.
+ * 👉 여기서는 "세션/JWT + 레이트리밋용 Redis A"만 사용한다.
  */
 @Slf4j
 @Configuration
@@ -34,7 +34,7 @@ public class RedisConfig {
     private String redisPassword;
 
     /**
-     * Configure Redis connection factory
+     * Configure Redis connection factory (Session / RateLimit Redis A)
      */
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
@@ -46,19 +46,31 @@ public class RedisConfig {
             config.setPassword(redisPassword);
         }
 
+        // Lettuce 연결 풀 설정 (대규모 동시 접속 대비)
+        io.lettuce.core.resource.ClientResources clientResources = io.lettuce.core.resource.DefaultClientResources.builder()
+                .ioThreadPoolSize(16)      // I/O 스레드 증가
+                .computationThreadPoolSize(16)  // 계산 스레드 증가
+                .build();
+
+        org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration clientConfig =
+                org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration.builder()
+                .clientResources(clientResources)
+                .build();
+
         log.info("╔═══════════════════════════════════════════════════════════════════════════════╗");
-        log.info("║                           Redis Configuration                                  ║");
+        log.info("║                       Redis(A) Session Configuration                          ║");
         log.info("╠═══════════════════════════════════════════════════════════════════════════════╣");
         log.info("║  Host: {}:{}", redisHost, redisPort);
         log.info("║  Password: {}", redisPassword != null && !redisPassword.isEmpty() ? "***" : "none");
         log.info("║  Use Case: Session Storage + Rate Limiting                                    ║");
+        log.info("║  Lettuce Pool: IO Threads=16, Computation Threads=16                          ║");
         log.info("╚═══════════════════════════════════════════════════════════════════════════════╝");
 
-        return new LettuceConnectionFactory(config);
+        return new LettuceConnectionFactory(config, clientConfig);
     }
 
     /**
-     * Configure StringRedisTemplate for operations
+     * Configure StringRedisTemplate for operations (Session Redis A)
      */
     @Bean
     public StringRedisTemplate stringRedisTemplate(RedisConnectionFactory connectionFactory) {
@@ -66,7 +78,7 @@ public class RedisConfig {
     }
 
     /**
-     * Configure RedisTemplate for general purpose (String -> Object)
+     * Configure RedisTemplate for general purpose (String -> Object) on Redis A
      */
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {

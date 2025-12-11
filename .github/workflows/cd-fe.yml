@@ -46,39 +46,64 @@ jobs:
         id: get-instances
         run: |
           echo "🔍 Fetching instances from Target Group: ${{ secrets.FRONTEND_TARGET_GROUP_NAME }}"
-          echo "ℹ️  Including all instances (healthy, unhealthy, draining)"
+          echo "ℹ️  Including ALL instances regardless of health status"
 
+          # Get Target Group ARN
           TG_ARN=$(aws elbv2 describe-target-groups \
             --names ${{ secrets.FRONTEND_TARGET_GROUP_NAME }} \
             --query 'TargetGroups[0].TargetGroupArn' \
             --output text)
 
-          # Get all instances regardless of health status
-          TARGET_HEALTH=$(aws elbv2 describe-target-health \
-            --target-group-arn $TG_ARN \
-            --output json)
+          echo "📋 Target Group ARN: $TG_ARN"
 
-          # Extract instance IDs (all health states)
-          INSTANCE_IDS=$(echo "$TARGET_HEALTH" | jq -r '.TargetHealthDescriptions[].Target.Id' | tr '\n' ' ')
+          # Get all targets (no health filter - AWS returns all by default)
+          echo ""
+          echo "📊 Fetching all targets with health status..."
+
+          # Get instance IDs (all health states)
+          INSTANCE_IDS=$(aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'TargetHealthDescriptions[].Target.Id' \
+            --output text)
 
           if [ -z "$INSTANCE_IDS" ]; then
-            echo "⚠️ No instances found in Target Group"
+            echo "❌ No instances found in Target Group"
             exit 1
           fi
 
-          # Show health status breakdown
-          echo "📊 Health Status:"
-          echo "$TARGET_HEALTH" | jq -r '.TargetHealthDescriptions[] | "  - \(.Target.Id): \(.TargetHealth.State) \(if .TargetHealth.Reason then "(\(.TargetHealth.Reason))" else "" end)"'
+          # Show detailed health status using AWS CLI query
+          echo "Health Status Details:"
+          aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'TargetHealthDescriptions[].[Target.Id, TargetHealth.State, TargetHealth.Reason]' \
+            --output table
 
+          # Get public IPs
           PUBLIC_IPS=$(aws ec2 describe-instances \
             --instance-ids $INSTANCE_IDS \
             --query 'Reservations[].Instances[].PublicIpAddress' \
             --output text)
 
+          # Count instances by health status
           TOTAL_COUNT=$(echo $INSTANCE_IDS | wc -w | tr -d ' ')
-          HEALTHY_COUNT=$(echo "$TARGET_HEALTH" | jq '[.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy")] | length')
+          HEALTHY_COUNT=$(aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'length(TargetHealthDescriptions[?TargetHealth.State==`healthy`])' \
+            --output text)
+          UNHEALTHY_COUNT=$(aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'length(TargetHealthDescriptions[?TargetHealth.State==`unhealthy`])' \
+            --output text)
 
-          echo "✅ Found $TOTAL_COUNT instances ($HEALTHY_COUNT healthy, $((TOTAL_COUNT - HEALTHY_COUNT)) unhealthy/draining)"
+          echo ""
+          echo "✅ Found $TOTAL_COUNT total instances:"
+          echo "   - Healthy: $HEALTHY_COUNT"
+          echo "   - Unhealthy: $UNHEALTHY_COUNT"
+          echo "   - Other: $((TOTAL_COUNT - HEALTHY_COUNT - UNHEALTHY_COUNT))"
+          echo ""
+          echo "Instance IDs: $INSTANCE_IDS"
+          echo "Public IPs: $PUBLIC_IPS"
+
           echo "instance-ips=$PUBLIC_IPS" >> $GITHUB_OUTPUT
           echo "instance-ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
           echo "tg-arn=$TG_ARN" >> $GITHUB_OUTPUT

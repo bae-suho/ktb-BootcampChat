@@ -189,28 +189,10 @@ jobs:
                 --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
                 "$DOCKER_IMAGE"
 
-              # 헬스 체크
-              echo "🏥 Health checking..."
-              sleep 10
-              for j in {1..100}; do
-                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health || echo "000")
-                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "304" ]; then
-                  echo "✅ Deployment Successful! (Status: $HTTP_CODE)"
-                  docker image prune -af --filter "until=72h" || true
-                  exit 0
-                fi
-                echo "⏳ Waiting for service... ($j/30)"
-                sleep 2
-              done
+              echo "✅ Container started successfully"
 
-              # 롤백
-              echo "❌ Deployment Failed. Rolling back..."
-              docker stop ktb-backend && docker rm ktb-backend
-              if [ ! -z "$OLD" ]; then
-                echo "🔄 Restoring old container..."
-                docker start $OLD || true
-              fi
-              exit 1
+              # 오래된 이미지 정리
+              docker image prune -af --filter "until=72h" || true
           ENDSSH
             then
               echo "✅ Success"

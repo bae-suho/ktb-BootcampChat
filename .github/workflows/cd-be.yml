@@ -118,6 +118,11 @@ jobs:
           ENCRYPTION_SALT: ${{ secrets.ENCRYPTION_SALT }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           MONGO_URI: ${{ secrets.MONGO_URI }}
+          # AWS S3 Configuration
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_S3_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
         run: |
           echo "🚀 Starting deployment..."
 
@@ -143,6 +148,10 @@ jobs:
               ENCRYPTION_SALT="${ENCRYPTION_SALT}" \
               JWT_SECRET="${JWT_SECRET}" \
               MONGO_URI="${MONGO_URI}" \
+              AWS_ACCESS_KEY="${AWS_ACCESS_KEY}" \
+              AWS_SECRET_KEY="${AWS_SECRET_KEY}" \
+              AWS_S3_REGION="${AWS_S3_REGION}" \
+              S3_BUCKET_NAME="${S3_BUCKET_NAME}" \
               bash << 'ENDSSH'
               set -e
               mkdir -p ~/ktb-backend && cd ~/ktb-backend
@@ -166,6 +175,13 @@ jobs:
               echo "PORT=5001" >> "$ENV_FILE"
               echo "WS_PORT=5002" >> "$ENV_FILE"
               echo "SPRING_PROFILES_ACTIVE=prodb" >> "$ENV_FILE"
+              echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}" >> "$ENV_FILE"
+              echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}" >> "$ENV_FILE"
+              echo "cloud.aws.region.static=${AWS_S3_REGION}" >> "$ENV_FILE"
+              echo "cloud.aws.s3.bucket=${S3_BUCKET_NAME}" >> "$ENV_FILE"
+              echo "cloud.aws.s3.base-dir=chat/uploads" >> "$ENV_FILE"
+              echo "cloud.aws.credentials.access-key=${AWS_ACCESS_KEY}" >> "$ENV_FILE"
+              echo "cloud.aws.credentials.secret-key=${AWS_SECRET_KEY}" >> "$ENV_FILE"
 
               echo "✅ Environment file created successfully"
               echo "📄 Environment file contents:"

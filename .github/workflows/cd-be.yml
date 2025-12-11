@@ -147,21 +147,23 @@ jobs:
 
               # 환경변수 파일 생성
               echo "⚙️  Creating environment file..."
-              ENV_FILE=".env"
-              cat > $ENV_FILE <<ENVEOF
-# Backend Environment Variables
-ENCRYPTION_KEY=${ENCRYPTION_KEY}
-ENCRYPTION_SALT=${ENCRYPTION_SALT}
-JWT_SECRET=${JWT_SECRET}
-MONGO_URI=${MONGO_URI}
-REDIS_HOST=10.0.101.105
-REDIS_HOST2=10.0.101.173
-REDIS_PORT=6379
-REDIS_PASSWORD=${REDIS_PASSWORD}
-PORT=5001
-WS_PORT=5002
-SPRING_PROFILES_ACTIVE=prodb
-ENVEOF
+              # 환경변수 파일 초기화
+              ENV_FILE=".env"   # 이미 위에서 설정돼 있다면 이 줄은 생략해도 돼
+              rm -f "$ENV_FILE"
+              touch "$ENV_FILE"
+              
+              echo "# Backend Environment Variables" > "$ENV_FILE"
+              echo "ENCRYPTION_KEY=${ENCRYPTION_KEY}" >> "$ENV_FILE"
+              echo "ENCRYPTION_SALT=${ENCRYPTION_SALT}" >> "$ENV_FILE"
+              echo "JWT_SECRET=${JWT_SECRET}" >> "$ENV_FILE"
+              echo "MONGO_URI=${MONGO_URI}" >> "$ENV_FILE"
+              echo "REDIS_HOST=10.0.101.105" >> "$ENV_FILE"
+              echo "REDIS_HOST2=10.0.101.173" >> "$ENV_FILE"
+              echo "REDIS_PORT=6379" >> "$ENV_FILE"
+              echo "REDIS_PASSWORD=${REDIS_PASSWORD}" >> "$ENV_FILE"
+              echo "PORT=5001" >> "$ENV_FILE"
+              echo "WS_PORT=5002" >> "$ENV_FILE"
+              echo "SPRING_PROFILES_ACTIVE=prodb" >> "$ENV_FILE"
 
               echo "✅ Environment file created successfully"
               echo "📄 Environment file contents:"

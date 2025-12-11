@@ -35,19 +35,18 @@ public class SocketIOConfig {
     @Value("${socketio.server.port:5002}")
     private Integer port;
 
-    // 👉 Redis A 설정 값 주입 (Session Redis 재사용)
-    @Value("${spring.data.redis.host:localhost}")
+    // 👉 Redis B 설정 값 주입
+    @Value("${socketio.redis.host:localhost}")
     private String redisHost;
 
-    @Value("${spring.data.redis.port:6379}")
+    @Value("${socketio.redis.port:6379}")
     private Integer redisPort;
 
-    @Value("${spring.data.redis.password:}")
+    @Value("${socketio.redis.password:}")
     private String redisPassword;
 
     /**
-     * Socket.IO용 Redisson 클라이언트 (Redis A 사용)
-     * Session과 동일한 Redis 인스턴스를 사용하여 네트워크 오버헤드 감소
+     * Redis B용 Redisson 클라이언트
      */
     @Bean(destroyMethod = "shutdown")
     public RedissonClient socketRedisClient() {
@@ -56,10 +55,8 @@ public class SocketIOConfig {
 
         var single = config.useSingleServer();
         single.setAddress(address);
-        single.setConnectionMinimumIdleSize(50);   // 10 -> 50: 최소 유휴 연결 대폭 증가
-        single.setConnectionPoolSize(500);         // 100 -> 500: 1000명 동시 연결 대비
-        single.setSubscriptionConnectionMinimumIdleSize(10);
-        single.setSubscriptionConnectionPoolSize(100);  // pub/sub 전용 풀
+        single.setConnectionMinimumIdleSize(2);
+        single.setConnectionPoolSize(10);
 
         // ⚡ 다중 EC2 환경 타임아웃 설정
         single.setConnectTimeout(10000);  // 연결 타임아웃: 10초
@@ -71,13 +68,9 @@ public class SocketIOConfig {
             single.setPassword(redisPassword);
         }
 
-        log.info("╔═══════════════════════════════════════════════════════════════════════════════╗");
-        log.info("║                    Socket.IO Redis(A) Configuration                           ║");
-        log.info("╠═══════════════════════════════════════════════════════════════════════════════╣");
-        log.info("║  Host: {}:{}", redisHost, redisPort);
-        log.info("║  Password: {}", redisPassword != null && !redisPassword.isEmpty() ? "***" : "none");
-        log.info("║  Use Case: Socket.IO Store + Session (Unified)                               ║");
-        log.info("╚═══════════════════════════════════════════════════════════════════════════════╝");
+        log.info("Socket Redis(B) Config - host: {}, port: {}, password: {}",
+                redisHost, redisPort,
+                redisPassword != null && !redisPassword.isEmpty() ? "***" : "none");
 
         return Redisson.create(config);
     }
@@ -92,10 +85,10 @@ public class SocketIOConfig {
 
         SocketConfig socketConfig = new SocketConfig();
         socketConfig.setReuseAddress(true);
-        socketConfig.setTcpNoDelay(true);  // true로 변경 - 지연 없이 즉시 전송
-        socketConfig.setAcceptBackLog(1024);  // 10 -> 1024: 대량 동시 연결 수용
-        socketConfig.setTcpSendBufferSize(65536);  // 4KB -> 64KB: 버퍼 오버플로우 방지
-        socketConfig.setTcpReceiveBufferSize(65536);  // 4KB -> 64KB: 수신 버퍼 증가
+        socketConfig.setTcpNoDelay(false);
+        socketConfig.setAcceptBackLog(10);
+        socketConfig.setTcpSendBufferSize(4096);
+        socketConfig.setTcpReceiveBufferSize(4096);
         config.setSocketConfig(socketConfig);
 
         config.setOrigin("*");
@@ -103,19 +96,11 @@ public class SocketIOConfig {
         // Socket.IO settings
         config.setPingTimeout(60000);
         config.setPingInterval(25000);
-        config.setUpgradeTimeout(30000);  // 10s -> 30s: heavy 테스트 시 핸드셰이크 타임아웃 방지
-
-        // Netty 스레드 최적화 (대규모 동시 연결 처리)
-        config.setBossThreads(8);      // Boss 스레드: 연결 수락 담당 (4 -> 8)
-        config.setWorkerThreads(128);  // Worker 스레드: I/O 처리 담당 (32 -> 128, 1000+ 동시 연결 처리)
-
-        // HTTP/WebSocket 제한 완화
-        config.setMaxHttpContentLength(1048576);  // 1MB (기본값 64KB → 증가)
-        config.setMaxFramePayloadLength(1048576); // 1MB WebSocket 프레임
+        config.setUpgradeTimeout(10000);
 
         config.setJsonSupport(new JacksonJsonSupport(new JavaTimeModule()));
 
-        // ✅ Redis A 기반 RedissonStoreFactory (Session과 통합)
+        // ✅ 여기서부터가 핵심: 인메모리 → Redis B 기반 RedissonStoreFactory
         config.setStoreFactory(new RedissonStoreFactory(socketRedisClient));
 
         log.info("Socket.IO server configured on {}:{} with {} boss threads and {} worker threads",
@@ -139,7 +124,7 @@ public class SocketIOConfig {
         return new SpringAnnotationScanner(socketIOServer);
     }
 
-    // ✅ ChatDataStore - Redis A 사용 (Session과 통합)
+    // ✅ ChatDataStore도 Redis B를 사용하도록 변경
     @Bean
     @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
     public ChatDataStore chatDataStore(RedissonClient socketRedisClient) {

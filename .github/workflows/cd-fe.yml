@@ -46,28 +46,39 @@ jobs:
         id: get-instances
         run: |
           echo "🔍 Fetching instances from Target Group: ${{ secrets.FRONTEND_TARGET_GROUP_NAME }}"
+          echo "ℹ️  Including all instances (healthy, unhealthy, draining)"
 
           TG_ARN=$(aws elbv2 describe-target-groups \
             --names ${{ secrets.FRONTEND_TARGET_GROUP_NAME }} \
             --query 'TargetGroups[0].TargetGroupArn' \
             --output text)
 
-          INSTANCE_IDS=$(aws elbv2 describe-target-health \
+          # Get all instances regardless of health status
+          TARGET_HEALTH=$(aws elbv2 describe-target-health \
             --target-group-arn $TG_ARN \
-            --query 'TargetHealthDescriptions[].Target.Id' \
-            --output text)
+            --output json)
+
+          # Extract instance IDs (all health states)
+          INSTANCE_IDS=$(echo "$TARGET_HEALTH" | jq -r '.TargetHealthDescriptions[].Target.Id' | tr '\n' ' ')
 
           if [ -z "$INSTANCE_IDS" ]; then
-            echo "⚠️ No healthy instances found"
+            echo "⚠️ No instances found in Target Group"
             exit 1
           fi
+
+          # Show health status breakdown
+          echo "📊 Health Status:"
+          echo "$TARGET_HEALTH" | jq -r '.TargetHealthDescriptions[] | "  - \(.Target.Id): \(.TargetHealth.State) \(if .TargetHealth.Reason then "(\(.TargetHealth.Reason))" else "" end)"'
 
           PUBLIC_IPS=$(aws ec2 describe-instances \
             --instance-ids $INSTANCE_IDS \
             --query 'Reservations[].Instances[].PublicIpAddress' \
             --output text)
 
-          echo "✅ Found $(echo $INSTANCE_IDS | wc -w) instances"
+          TOTAL_COUNT=$(echo $INSTANCE_IDS | wc -w | tr -d ' ')
+          HEALTHY_COUNT=$(echo "$TARGET_HEALTH" | jq '[.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy")] | length')
+
+          echo "✅ Found $TOTAL_COUNT instances ($HEALTHY_COUNT healthy, $((TOTAL_COUNT - HEALTHY_COUNT)) unhealthy/draining)"
           echo "instance-ips=$PUBLIC_IPS" >> $GITHUB_OUTPUT
           echo "instance-ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
           echo "tg-arn=$TG_ARN" >> $GITHUB_OUTPUT

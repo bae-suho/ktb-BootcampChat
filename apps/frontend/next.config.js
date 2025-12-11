@@ -1,15 +1,5 @@
 /** @type {import('next').NextConfig} */
 
-// 서버 시작 시 환경변수 로그 출력
-console.log('='.repeat(60));
-console.log(`🚀 Next.js Server Starting... NEXT_PUBLIC_API_URL:\', process.env.NEXT_PUBLIC_API_URL || \'not set`);
-console.log('='.repeat(60));
-console.log('📍 Environment Configuration:');
-console.log('   NODE_ENV:', process.env.NODE_ENV || 'not set');
-console.log('   NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL || 'not set');
-console.log('   NEXT_PUBLIC_SOCKET_URL:', process.env.NEXT_PUBLIC_SOCKET_URL || 'not set');
-console.log('='.repeat(60));
-
 const nextConfig = {
     reactStrictMode: false, // 에러 처리 문제 해결을 위해 일시적으로 비활성화
     transpilePackages: ['@vapor-ui/core', '@vapor-ui/icons'],
@@ -22,12 +12,13 @@ const nextConfig = {
         buildActivity: true,
         buildActivityPosition: 'bottom-right'
     },
-    // 개발 환경에서만 더 자세한 에러 로깅
-    ...(process.env.NODE_ENV === 'development' && {
-        experimental: {
+    experimental: {
+        // 서버 시작 시 instrumentation.js 실행 활성화
+        instrumentationHook: true,
+        ...(process.env.NODE_ENV === 'development' && {
             forceSwcTransforms: true
-        }
-    })
+        })
+    }
 };
 
 module.exports = nextConfig;

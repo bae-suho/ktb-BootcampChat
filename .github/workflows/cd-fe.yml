@@ -42,14 +42,20 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 2. Docker Build & Push 실행 (캐시 옵션 제거됨)
+      # 2. Docker Build & Push 실행
       - name: Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          # 수정 전: context: .
+          # 수정 후: frontend 폴더를 빌드 컨텍스트로 지정
+          context: ./apps/frontend
+
+          # Dockerfile 위치 지정
           file: ./apps/frontend/Dockerfile
+
           push: true
           tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short-sha }}
 
       - name: Configure AWS credentials

@@ -306,12 +306,12 @@ class AuthService {
       if (!API_URL) {
         throw new Error('API URL이 설정되지 않았습니다.');
       }
-
+      console.log(API_URL)
       const response = await api.get('/api/health', {
         timeout: 3000, // 타임아웃을 3초로 단축
         validateStatus: (status) => status < 500 // 5xx 에러만 실제 에러로 처리
       });
-
+      console.log(response);
       return response.data?.status === 'ok' || response.status === 200;
     } catch (error) {
       // 네트워크 에러나 타임아웃은 더 구체적인 메시지 제공

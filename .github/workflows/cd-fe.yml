@@ -155,11 +155,11 @@ jobs:
               echo "⚙️  Creating environment file..."
               ENV_FILE=".env.production"
               cat > $ENV_FILE << ENVEOF
-# Frontend Environment Variables
-NEXT_PUBLIC_API_URL=$API_URL
-NEXT_PUBLIC_SOCKET_URL=$SOCKET_URL
-NODE_ENV=production
-PORT=3000
+              # Frontend Environment Variables
+              NEXT_PUBLIC_API_URL=$API_URL
+              NEXT_PUBLIC_SOCKET_URL=$SOCKET_URL
+              NODE_ENV=production
+              PORT=3000
 ENVEOF
 
               echo "✅ Environment file created:"

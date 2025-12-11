@@ -108,7 +108,7 @@ jobs:
             echo "📦 Instance $((i+1))/$TOTAL: $ID ($IP)"
 
             if ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${IP} \
-              DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG}" \
+              DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest" \
               API_URL="${NEXT_PUBLIC_API_URL}" \
               SOCKET_URL="${NEXT_PUBLIC_SOCKET_URL}" \
               bash << 'ENDSSH'

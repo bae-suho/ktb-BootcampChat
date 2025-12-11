@@ -151,6 +151,20 @@ jobs:
               set -e
               mkdir -p ~/ktb-frontend && cd ~/ktb-frontend
 
+              # 환경변수 파일 생성
+              echo "⚙️  Creating environment file..."
+              ENV_FILE=".env.production"
+              cat > $ENV_FILE << EOF
+              # Frontend Environment Variables
+              NEXT_PUBLIC_API_URL=$API_URL
+              NEXT_PUBLIC_SOCKET_URL=$SOCKET_URL
+              NODE_ENV=production
+              PORT=3000
+              EOF
+
+              echo "✅ Environment file created:"
+              cat $ENV_FILE
+
               echo "📦 Pulling image: $DOCKER_IMAGE"
               docker pull "$DOCKER_IMAGE"
 
@@ -159,12 +173,9 @@ jobs:
               docker rm ktb-frontend 2>/dev/null || true
 
               echo "🚀 Starting container with image: $DOCKER_IMAGE"
-              echo $API_URL
-              echo $SOCKET_URL
               docker run -d --name ktb-frontend --restart unless-stopped \
                 -p 3000:3000 \
-                -e NEXT_PUBLIC_API_URL="$API_URL" \
-                -e NEXT_PUBLIC_SOCKET_URL="$SOCKET_URL" \
+                --env-file $ENV_FILE \
                 --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
                 "$DOCKER_IMAGE"
 

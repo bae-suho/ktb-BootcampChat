@@ -58,6 +58,11 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short-sha }}
 
+          # 빌드 시점에 환경변수 주입 (Next.js 번들에 포함됨)
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_SOCKET_URL=${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -78,33 +83,15 @@ jobs:
 
       - name: Deploy to EC2 instance
         env:
-          IMAGE_TAG: ${{ steps.vars.outputs.short-sha }}
           SSH_USER: ${{ secrets.EC2_SSH_USER }}
           HOST_IP: ${{ secrets.EC_INSTANCE_FE2 }}
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-          NEXT_PUBLIC_SOCKET_URL: ${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
         run: |
           echo "🚀 Starting deployment to $HOST_IP..."
 
           ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${HOST_IP} \
             DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest" \
-            API_URL="${NEXT_PUBLIC_API_URL}" \
-            SOCKET_URL="${NEXT_PUBLIC_SOCKET_URL}" \
             bash << 'ENDSSH'
             set -e
-            mkdir -p ~/ktb-frontend && cd ~/ktb-frontend
-
-            # 환경변수 파일 생성
-            echo "⚙️  Creating environment file..."
-            ENV_FILE=".env.local"
-            touch $ENV_FILE
-          
-            > $ENV_FILE
-            echo "NEXT_PUBLIC_API_URL=${API_URL}" >> $ENV_FILE
-            echo "NEXT_PUBLIC_SOCKET_URL=${SOCKET_URL}" >> $ENV_FILE
-          
-            echo "📄 Environment file created:"
-            cat $ENV_FILE
 
             echo "📦 Pulling image: $DOCKER_IMAGE"
             docker pull "$DOCKER_IMAGE"
@@ -120,7 +107,6 @@ jobs:
             echo "🚀 Starting container..."
             docker run -d --name ktb-frontend --restart unless-stopped \
               -p 3000:3000 \
-              --env-file $ENV_FILE \
               --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
               "$DOCKER_IMAGE"
 

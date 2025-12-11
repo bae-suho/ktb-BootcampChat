@@ -2,6 +2,14 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
+# 빌드 시점에 사용할 ARG 선언
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_SOCKET_URL
+
+# ARG를 ENV로 변환 (빌드 중에 Next.js가 사용)
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
+
 # 패키지 파일 복사
 COPY package.json ./
 
@@ -11,7 +19,7 @@ RUN npm i
 # 소스 코드 복사
 COPY . .
 
-# Next.js 빌드
+# Next.js 빌드 (이 시점에 NEXT_PUBLIC_* 환경변수가 번들에 포함됨)
 RUN npm run build
 
 # Stage 2: Runner

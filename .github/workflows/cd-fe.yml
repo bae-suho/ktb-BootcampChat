@@ -1,12 +1,12 @@
 name: CD Frontend
 
 on:
-  workflow_run:
-    workflows: ["CI Frontend"]
-    types:
-      - completed
+  push:
     branches:
       - deploy
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/cd-fe.yml'
 
 env:
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
@@ -21,7 +21,6 @@ jobs:
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     environment:
       name: production
 

@@ -159,6 +159,8 @@ jobs:
               docker rm ktb-frontend 2>/dev/null || true
 
               echo "🚀 Starting container with image: $DOCKER_IMAGE"
+              echo $API_URL
+              echo $SOCKET_URL
               docker run -d --name ktb-frontend --restart unless-stopped \
                 -p 3000:3000 \
                 -e NEXT_PUBLIC_API_URL="$API_URL" \

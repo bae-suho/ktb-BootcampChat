@@ -133,7 +133,11 @@ jobs:
             echo ""
             echo "📦 Instance $((i+1))/$TOTAL: $ID ($IP)"
 
-            if ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${IP} \
+            if ssh -i ~/.ssh/deploy_key \
+              -o ConnectTimeout=30 \
+              -o ServerAliveInterval=60 \
+              -o ServerAliveCountMax=10 \
+              ${SSH_USER}@${IP} \
               DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest" \
               ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
               ENCRYPTION_SALT="${ENCRYPTION_SALT}" \

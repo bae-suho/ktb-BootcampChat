@@ -41,72 +41,8 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Get EC2 instances from Target Group
-        id: get-instances
-        run: |
-          echo "🔍 Fetching instances from Target Group: ${{ secrets.FRONTEND_TARGET_GROUP_NAME }}"
-          echo "ℹ️  Including ALL instances regardless of health status"
-
-          # Get Target Group ARN
-          TG_ARN=$(aws elbv2 describe-target-groups \
-            --names ${{ secrets.FRONTEND_TARGET_GROUP_NAME }} \
-            --query 'TargetGroups[0].TargetGroupArn' \
-            --output text)
-
-          echo "📋 Target Group ARN: $TG_ARN"
-
-          # Get all targets (no health filter - AWS returns all by default)
-          echo ""
-          echo "📊 Fetching all targets with health status..."
-
-          # Get instance IDs (all health states)
-          INSTANCE_IDS=$(aws elbv2 describe-target-health \
-            --target-group-arn $TG_ARN \
-            --query 'TargetHealthDescriptions[].Target.Id' \
-            --output text)
-
-          if [ -z "$INSTANCE_IDS" ]; then
-            echo "❌ No instances found in Target Group"
-            exit 1
-          fi
-
-          # Show detailed health status using AWS CLI query
-          echo "Health Status Details:"
-          aws elbv2 describe-target-health \
-            --target-group-arn $TG_ARN \
-            --query 'TargetHealthDescriptions[].[Target.Id, TargetHealth.State, TargetHealth.Reason]' \
-            --output table
-
-          # Get public IPs
-          PUBLIC_IPS=$(aws ec2 describe-instances \
-            --instance-ids $INSTANCE_IDS \
-            --query 'Reservations[].Instances[].PublicIpAddress' \
-            --output text)
-
-          # Count instances by health status
-          TOTAL_COUNT=$(echo $INSTANCE_IDS | wc -w | tr -d ' ')
-          HEALTHY_COUNT=$(aws elbv2 describe-target-health \
-            --target-group-arn $TG_ARN \
-            --query 'length(TargetHealthDescriptions[?TargetHealth.State==`healthy`])' \
-            --output text)
-          UNHEALTHY_COUNT=$(aws elbv2 describe-target-health \
-            --target-group-arn $TG_ARN \
-            --query 'length(TargetHealthDescriptions[?TargetHealth.State==`unhealthy`])' \
-            --output text)
-
-          echo ""
-          echo "✅ Found $TOTAL_COUNT total instances:"
-          echo "   - Healthy: $HEALTHY_COUNT"
-          echo "   - Unhealthy: $UNHEALTHY_COUNT"
-          echo "   - Other: $((TOTAL_COUNT - HEALTHY_COUNT - UNHEALTHY_COUNT))"
-          echo ""
-          echo "Instance IDs: $INSTANCE_IDS"
-          echo "Public IPs: $PUBLIC_IPS"
-
-          echo "instance-ips=$PUBLIC_IPS" >> $GITHUB_OUTPUT
-          echo "instance-ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
-          echo "tg-arn=$TG_ARN" >> $GITHUB_OUTPUT
+      
+      # [삭제됨] Target Group에서 인스턴스를 가져오는 단계 제거
 
       - name: Configure SSH
         run: |
@@ -119,116 +55,80 @@ jobs:
             UserKnownHostsFile /dev/null
           EOF
 
-      - name: Deploy to EC2 instances
+      - name: Deploy to EC2 instance
         env:
           IMAGE_TAG: ${{ steps.vars.outputs.short-sha }}
           SSH_USER: ${{ secrets.EC2_SSH_USER }}
-          INSTANCE_IPS: ${{ steps.get-instances.outputs.instance-ips }}
-          INSTANCE_IDS: ${{ steps.get-instances.outputs.instance-ids }}
-          TG_ARN: ${{ steps.get-instances.outputs.tg-arn }}
+          # 수정: Target Group 출력 대신 Secret의 단일 IP 사용
+          HOST_IP: ${{ secrets.EC_INSTANCE_FE2 }}
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_SOCKET_URL: ${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
         run: |
-          echo "🚀 Starting deployment..."
+          echo "🚀 Starting deployment to $HOST_IP..."
 
-          IPS=($INSTANCE_IPS)
-          IDS=($INSTANCE_IDS)
-          TOTAL=${#IPS[@]}
-          SUCCESS=0
+          # 반복문 제거 후 단일 호스트에 대해 실행
+          ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${HOST_IP} \
+            DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest" \
+            API_URL="${NEXT_PUBLIC_API_URL}" \
+            SOCKET_URL="${NEXT_PUBLIC_SOCKET_URL}" \
+            bash << 'ENDSSH'
+            set -e
+            mkdir -p ~/ktb-frontend && cd ~/ktb-frontend
 
-          for i in "${!IPS[@]}"; do
-            IP=${IPS[$i]}
-            ID=${IDS[$i]}
+            # 환경변수 파일 생성
+            echo "⚙️  Creating environment file..."
+            ENV_FILE=".env.local"
+            touch $ENV_FILE
+          
+            # 기존 파일 내용 비우고 새로 쓰기
+            > $ENV_FILE
+            echo "NEXT_PUBLIC_API_URL=${API_URL}" >> $ENV_FILE
+            echo "NEXT_PUBLIC_SOCKET_URL=${SOCKET_URL}" >> $ENV_FILE
+          
+            echo "📄 Environment file created:"
+            cat $ENV_FILE
 
-            echo ""
-            echo "📦 Instance $((i+1))/$TOTAL: $ID ($IP)"
+            echo "📦 Pulling image: $DOCKER_IMAGE"
+            docker pull "$DOCKER_IMAGE"
 
-            if ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${IP} \
-              DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest" \
-              API_URL="${NEXT_PUBLIC_API_URL}" \
-              SOCKET_URL="${NEXT_PUBLIC_SOCKET_URL}" \
-              bash << 'ENDSSH'
-              set -e
-              mkdir -p ~/ktb-frontend && cd ~/ktb-frontend
-
-              # 환경변수 파일 생성
-              echo "⚙️  Creating environment file..."
-              ENV_FILE=".env.local"
-              touch $ENV_FILE
-              
-              echo "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" >> $ENV_FILE
-              echo "NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL}" >> $ENV_FILE
-              
-              if ! grep -q "NEXT_PUBLIC_API_URL" "$ENV_FILE"; then
-              echo "❌ Error: NEXT_PUBLIC_API_URL not found in environment file"
-              exit 1
-              fi
-              
-              echo "📄  Environment file created:"
-              cat $ENV_FILE
-              
-              
-
-              # 환경변수 파일 생성 확인
-              if [ ! -f "$ENV_FILE" ]; then
-                echo "❌ Error: Environment file was not created"
-                exit 1
-              fi
-
-              if [ ! -s "$ENV_FILE" ]; then
-                echo "❌ Error: Environment file is empty"
-                exit 1
-              fi
-
-              if ! grep -q "NEXT_PUBLIC_API_URL" "$ENV_FILE"; then
-                echo "❌ Error: NEXT_PUBLIC_API_URL not found in environment file"
-                exit 1
-              fi
-
-              echo "✅ Environment file created successfully:"
-              cat $ENV_FILE
-
-              echo "📦 Pulling image: $DOCKER_IMAGE"
-              docker pull "$DOCKER_IMAGE"
-
-              OLD=$(docker ps -q -f name=ktb-frontend) || true
+            # 기존 컨테이너 확인 및 중지
+            OLD=$(docker ps -q -f name=ktb-frontend) || true
+            if [ ! -z "$OLD" ]; then
+              echo "🛑 Stopping old container: $OLD"
               docker stop ktb-frontend 2>/dev/null || true
               docker rm ktb-frontend 2>/dev/null || true
-
-              echo "🚀 Starting container with image: $DOCKER_IMAGE"
-              docker run -d --name ktb-frontend --restart unless-stopped \
-                -p 3000:3000 \
-                --env-file $ENV_FILE \
-                --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
-                "$DOCKER_IMAGE"
-
-              sleep 10
-              for i in {1..30}; do
-                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
-                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "304" ]; then
-                  docker image prune -af --filter "until=72h" || true
-                  echo "✅ Deployed"
-                  exit 0
-                fi
-                sleep 2
-              done
-              docker stop ktb-frontend && docker rm ktb-frontend
-              [ ! -z "$OLD" ] && docker start $OLD || true
-              exit 1
-          ENDSSH
-            then
-              echo "✅ Success"
-              SUCCESS=$((SUCCESS + 1))
-            else
-              echo "❌ Failed"
             fi
 
-            [ $i -lt $((TOTAL - 1)) ] && sleep 10
-          done
+            echo "🚀 Starting container..."
+            docker run -d --name ktb-frontend --restart unless-stopped \
+              -p 3000:3000 \
+              --env-file $ENV_FILE \
+              --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
+              "$DOCKER_IMAGE"
 
-          echo ""
-          echo "📊 Result: $SUCCESS/$TOTAL succeeded"
-          [ $SUCCESS -eq $TOTAL ] && echo "🎉 All deployed!" || exit 1
+            # 헬스 체크 (Health Check)
+            echo "🏥 Health checking..."
+            sleep 10
+            for i in {1..30}; do
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
+              if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "304" ]; then
+                echo "✅ Deployment Successful! (Status: $HTTP_CODE)"
+                docker image prune -af --filter "until=72h" || true
+                exit 0
+              fi
+              echo "⏳ Waiting for service... ($i/30)"
+              sleep 2
+            done
+
+            # 실패 시 롤백 로직
+            echo "❌ Deployment Failed. Rolling back..."
+            docker stop ktb-frontend && docker rm ktb-frontend
+            if [ ! -z "$OLD" ]; then
+              echo "🔄 Restoring old container..."
+              docker start $OLD || true
+            fi
+            exit 1
+          ENDSSH
 
       - name: Cleanup
         if: always()

@@ -1,0 +1,70 @@
+name: CI Frontend
+
+on:
+  push:
+    branches:
+      - deploy
+    paths:
+      - 'apps/frontend/**'
+      - '.github/workflows/ci-fe.yml'
+
+env:
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  IMAGE_NAME: ktb-bootcamp-chat-frontend
+
+concurrency:
+  group: ci-frontend-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check-image:
+    name: Check Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: vars
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "🏷️ Version: ${SHORT_SHA}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Check if Docker image exists
+        run: |
+          IMAGE_TAG=${{ steps.vars.outputs.short-sha }}
+          IMAGE_FULL="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+
+          echo "🔍 Checking if image exists: ${IMAGE_FULL}"
+
+          if docker manifest inspect ${IMAGE_FULL} > /dev/null 2>&1; then
+            echo "✅ Image found on Docker Hub"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "✅ CI Passed - Image exists"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Image: ${IMAGE_FULL}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          else
+            echo "❌ Image NOT found on Docker Hub"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "⚠️  Please build and push the image locally:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "export IMAGE_TAG=${IMAGE_TAG}"
+            echo "cd apps/frontend"
+            echo "docker build -t ${IMAGE_FULL} ."
+            echo "docker push ${IMAGE_FULL}"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          fi

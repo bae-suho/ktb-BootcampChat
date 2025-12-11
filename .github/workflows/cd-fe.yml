@@ -42,21 +42,15 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 2. Docker Build & Push 실행
+      # 2. Docker Build & Push 실행 (캐시 옵션 제거됨)
       - name: Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
-          # context: Dockerfile이 있는 위치 (루트라면 . 또는 apps/frontend 등 확인 필요)
-          # 만약 apps/frontend 안에 Dockerfile이 있다면 아래 주석 해제 후 경로 수정
           context: .
-          file: ./apps/frontend/Dockerfile # Dockerfile 경로 명시 (프로젝트 구조에 맞게 수정 필요)
+          file: ./apps/frontend/Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short-sha }}
-          # 빌드 속도 향상을 위한 캐시 설정
-          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

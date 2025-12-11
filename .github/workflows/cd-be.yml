@@ -1,0 +1,228 @@
+name: CD Backend
+
+on:
+  push:
+    branches:
+      - deploy
+    paths:
+      - 'apps/backend/**'
+      - '.github/workflows/cd-be.yml'
+
+env:
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  IMAGE_NAME: ktb-bootcamp-chat-backend
+  AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
+
+concurrency:
+  group: cd-backend-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get EC2 instances from Target Group
+        id: get-instances
+        run: |
+          echo "🔍 Fetching instances from Target Group: ${{ secrets.BACKEND_TARGET_GROUP_NAME }}"
+          echo "ℹ️  Including ALL instances regardless of health status"
+
+          # Get Target Group ARN
+          TG_ARN=$(aws elbv2 describe-target-groups \
+            --names ${{ secrets.BACKEND_TARGET_GROUP_NAME }} \
+            --query 'TargetGroups[0].TargetGroupArn' \
+            --output text)
+
+          echo "📋 Target Group ARN: $TG_ARN"
+
+          # Get instance IDs (all health states)
+          INSTANCE_IDS=$(aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'TargetHealthDescriptions[].Target.Id' \
+            --output text)
+
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "❌ No instances found in Target Group"
+            exit 1
+          fi
+
+          # Show detailed health status
+          echo "Health Status Details:"
+          aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'TargetHealthDescriptions[].[Target.Id, TargetHealth.State, TargetHealth.Reason]' \
+            --output table
+
+          # Get public IPs
+          PUBLIC_IPS=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_IDS \
+            --query 'Reservations[].Instances[].PublicIpAddress' \
+            --output text)
+
+          # Count instances by health status
+          TOTAL_COUNT=$(echo $INSTANCE_IDS | wc -w | tr -d ' ')
+          HEALTHY_COUNT=$(aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'length(TargetHealthDescriptions[?TargetHealth.State==`healthy`])' \
+            --output text)
+          UNHEALTHY_COUNT=$(aws elbv2 describe-target-health \
+            --target-group-arn $TG_ARN \
+            --query 'length(TargetHealthDescriptions[?TargetHealth.State==`unhealthy`])' \
+            --output text)
+
+          echo ""
+          echo "✅ Found $TOTAL_COUNT total instances:"
+          echo "   - Healthy: $HEALTHY_COUNT"
+          echo "   - Unhealthy: $UNHEALTHY_COUNT"
+          echo "   - Other: $((TOTAL_COUNT - HEALTHY_COUNT - UNHEALTHY_COUNT))"
+          echo ""
+          echo "Instance IDs: $INSTANCE_IDS"
+          echo "Public IPs: $PUBLIC_IPS"
+
+          echo "instance-ips=$PUBLIC_IPS" >> $GITHUB_OUTPUT
+          echo "instance-ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
+          echo "tg-arn=$TG_ARN" >> $GITHUB_OUTPUT
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 400 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config << 'EOF'
+          Host *
+            StrictHostKeyChecking accept-new
+            UserKnownHostsFile /dev/null
+          EOF
+
+      - name: Deploy to EC2 instances
+        env:
+          SSH_USER: ${{ secrets.EC2_SSH_USER }}
+          INSTANCE_IPS: ${{ steps.get-instances.outputs.instance-ips }}
+          INSTANCE_IDS: ${{ steps.get-instances.outputs.instance-ids }}
+          # Secrets
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          ENCRYPTION_SALT: ${{ secrets.ENCRYPTION_SALT }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: |
+          echo "🚀 Starting deployment..."
+
+          IPS=($INSTANCE_IPS)
+          IDS=($INSTANCE_IDS)
+          TOTAL=${#IPS[@]}
+          SUCCESS=0
+
+          for i in "${!IPS[@]}"; do
+            IP=${IPS[$i]}
+            ID=${IDS[$i]}
+
+            echo ""
+            echo "📦 Instance $((i+1))/$TOTAL: $ID ($IP)"
+
+            if ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 ${SSH_USER}@${IP} \
+              DOCKER_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest" \
+              ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
+              ENCRYPTION_SALT="${ENCRYPTION_SALT}" \
+              JWT_SECRET="${JWT_SECRET}" \
+              MONGO_URI="${MONGO_URI}" \
+              REDIS_PASSWORD="${REDIS_PASSWORD}" \
+              bash << 'ENDSSH'
+              set -e
+              mkdir -p ~/ktb-backend && cd ~/ktb-backend
+
+              # 환경변수 파일 생성
+              echo "⚙️  Creating environment file..."
+              ENV_FILE=".env"
+              cat > $ENV_FILE <<ENVEOF
+# Backend Environment Variables
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
+ENCRYPTION_SALT=${ENCRYPTION_SALT}
+JWT_SECRET=${JWT_SECRET}
+MONGO_URI=${MONGO_URI}
+REDIS_HOST=10.0.101.105
+REDIS_HOST2=10.0.101.173
+REDIS_PORT=6379
+REDIS_PASSWORD=${REDIS_PASSWORD}
+PORT=5001
+WS_PORT=5002
+SPRING_PROFILES_ACTIVE=prodb
+ENVEOF
+
+              echo "✅ Environment file created successfully"
+              echo "📄 Environment file contents:"
+              cat $ENV_FILE
+
+              echo "📦 Pulling image: $DOCKER_IMAGE"
+              docker pull "$DOCKER_IMAGE"
+
+              # 기존 컨테이너 중지
+              OLD=$(docker ps -q -f name=ktb-backend) || true
+              if [ ! -z "$OLD" ]; then
+                echo "🛑 Stopping old container: $OLD"
+                docker stop ktb-backend 2>/dev/null || true
+                docker rm ktb-backend 2>/dev/null || true
+              fi
+
+              echo "🚀 Starting container..."
+              docker run -d --name ktb-backend --restart unless-stopped \
+                -p 8080:8080 \
+                --env-file $ENV_FILE \
+                --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
+                "$DOCKER_IMAGE"
+
+              # 헬스 체크
+              echo "🏥 Health checking..."
+              sleep 10
+              for j in {1..30}; do
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health || echo "000")
+                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "304" ]; then
+                  echo "✅ Deployment Successful! (Status: $HTTP_CODE)"
+                  docker image prune -af --filter "until=72h" || true
+                  exit 0
+                fi
+                echo "⏳ Waiting for service... ($j/30)"
+                sleep 2
+              done
+
+              # 롤백
+              echo "❌ Deployment Failed. Rolling back..."
+              docker stop ktb-backend && docker rm ktb-backend
+              if [ ! -z "$OLD" ]; then
+                echo "🔄 Restoring old container..."
+                docker start $OLD || true
+              fi
+              exit 1
+          ENDSSH
+            then
+              echo "✅ Success"
+              SUCCESS=$((SUCCESS + 1))
+            else
+              echo "❌ Failed"
+            fi
+
+            # 다음 인스턴스 배포 전 대기
+            [ $i -lt $((TOTAL - 1)) ] && sleep 10
+          done
+
+          echo ""
+          echo "📊 Result: $SUCCESS/$TOTAL succeeded"
+          [ $SUCCESS -eq $TOTAL ] && echo "🎉 All deployed!" || exit 1
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

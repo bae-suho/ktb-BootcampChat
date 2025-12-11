@@ -29,7 +29,7 @@ import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRA
 @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
 public class SocketIOConfig {
 
-    @Value("${socketio.server.host:localhost}")
+    @Value("${socketio.server.host:0.0.0.0}")
     private String host;
 
     @Value("${socketio.server.port:5002}")
@@ -60,6 +60,12 @@ public class SocketIOConfig {
         single.setConnectionPoolSize(500);         // 100 -> 500: 1000명 동시 연결 대비
         single.setSubscriptionConnectionMinimumIdleSize(10);
         single.setSubscriptionConnectionPoolSize(100);  // pub/sub 전용 풀
+
+        // ⚡ 다중 EC2 환경 타임아웃 설정
+        single.setConnectTimeout(10000);  // 연결 타임아웃: 10초
+        single.setTimeout(5000);          // 명령 타임아웃: 5초
+        single.setRetryAttempts(3);       // 재시도 횟수: 3회
+        single.setRetryInterval(1500);    // 재시도 간격: 1.5초
 
         if (redisPassword != null && !redisPassword.isEmpty()) {
             single.setPassword(redisPassword);

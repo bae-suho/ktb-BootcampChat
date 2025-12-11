@@ -188,7 +188,7 @@ jobs:
               cat $ENV_FILE
 
               echo "📦 Pulling image: $DOCKER_IMAGE"
-              docker pull "$DOCKER_IMAGE"
+              docker pull wafriend1031/ktb-chat-backend:latest
 
               # 기존 컨테이너 중지
               OLD=$(docker ps -q -f name=ktb-backend) || true
@@ -204,7 +204,7 @@ jobs:
                 -p 5002:5002 \
                 --env-file $ENV_FILE \
                 --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
-                "$DOCKER_IMAGE"
+                wafriend1031/ktb-chat-backend:latest
 
               echo "✅ Container started successfully"
 
